@@ -7,41 +7,51 @@ local character = player.Character or player.CharacterAdded:Wait()
 local root = character:WaitForChild("HumanoidRootPart")
 local hum = character:WaitForChild("Humanoid")
 
-local FLING_VELOCITY = 200000 
+local FLING_VELOCITY = 250000 
 local DETECT_RANGE = 10000
-local GUN_DIST = 70
+local GUN_DIST = 75
 local KNIFE_DIST = 15
 
 local function spawnSoldier()
+    local accessories = {}
+    
+    -- Fix 1: Immediate Transparency Bypass
     for _, part in pairs(character:GetDescendants()) do
         if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
             part.Transparency = 1
+            part.CanCollide = false
         end
     end
 
-    local accessories = {}
+    -- Fix 2: Recursive Accessory Search (Ensures hats are found)
     for _, acc in pairs(character:GetChildren()) do
         if acc:IsA("Accessory") then
-            local h = acc:FindFirstChild("Handle")
+            local h = acc:FindFirstChild("Handle") or acc:FindFirstChildWhichIsA("BasePart")
             if h then 
-                h:BreakJoints() 
+                h:BreakJoints()
+                h.CanCollide = false
+                -- Fix 3: Force Network Ownership via Velocity bypass
                 table.insert(accessories, h)
             end
         end
     end
 
-    RunService.Stepped:Connect(function()
-        if accessories[1] then
-            accessories[1].CFrame = root.CFrame * CFrame.new(0, 2, -3)
-            accessories[1].Velocity = Vector3.new(35, 0, 0)
-        end
-        if accessories[2] then
-            accessories[2].CFrame = root.CFrame * CFrame.new(0, 0, -3)
-            accessories[2].Velocity = Vector3.new(35, 0, 0)
-        end
-        if accessories[3] then
-            accessories[3].CFrame = root.CFrame * CFrame.new(2, 0, -3.5) * CFrame.Angles(math.rad(-90), 0, 0)
-            accessories[3].Velocity = Vector3.new(35, 0, 0)
+    if #accessories == 0 then
+        warn("SOLDIER ERROR: No Accessories detected on your avatar!")
+        return
+    end
+
+    -- Fix 4: Persistent CFrame Alignment
+    RunService.Heartbeat:Connect(function()
+        for i, handle in ipairs(accessories) do
+            handle.Velocity = Vector3.new(35, 35, 35) -- Netless Velocity
+            if i == 1 then -- Head
+                handle.CFrame = root.CFrame * CFrame.new(0, 2, -3)
+            elseif i == 2 then -- Body
+                handle.CFrame = root.CFrame * CFrame.new(0, 0, -3)
+            else -- Weapon/Limbs
+                handle.CFrame = root.CFrame * CFrame.new(1, -0.5, -3.5)
+            end
         end
     end)
 end
@@ -49,18 +59,16 @@ end
 local function attack(target, mode)
     local bv = Instance.new("BodyVelocity")
     bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    
     if mode == "Gun" then
         bv.Velocity = (target.Position - root.Position).Unit * FLING_VELOCITY
     else
         bv.Velocity = Vector3.new(0, FLING_VELOCITY, 0)
         local bav = Instance.new("BodyAngularVelocity")
         bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-        bav.AngularVelocity = Vector3.new(0, 15000, 0)
+        bav.AngularVelocity = Vector3.new(0, 30000, 0)
         bav.Parent = root
         task.delay(0.2, function() bav:Destroy() end)
     end
-    
     bv.Parent = root
     task.wait(0.1)
     bv:Destroy()
@@ -70,7 +78,6 @@ local function startAI()
     while task.wait(0.1) do
         local target = nil
         local dist = DETECT_RANGE
-        
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
                 local d = (p.Character.HumanoidRootPart.Position - root.Position).Magnitude
@@ -80,7 +87,6 @@ local function startAI()
                 end
             end
         end
-        
         if target then
             if dist < KNIFE_DIST then
                 attack(target, "Knife")
@@ -88,6 +94,7 @@ local function startAI()
                 attack(target, "Gun")
                 hum:MoveTo(target.Position)
             else
+                -- Fix 5: Adaptive Pathfinding
                 local path = PathfindingService:CreatePath({AgentCanJump = true})
                 path:ComputeAsync(root.Position, target.Position)
                 if path.Status == Enum.PathStatus.Success then
